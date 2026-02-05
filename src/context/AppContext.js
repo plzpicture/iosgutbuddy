@@ -8,7 +8,7 @@ import {
   initialDailyRecords,
 } from '../constants/data';
 
-const OPENAI_API_KEY = ''; // Set your OpenAI API key here
+const CLAUDE_API_KEY = ''; // Set your Anthropic Claude API key here
 
 const AppContext = createContext();
 
@@ -184,7 +184,7 @@ export function AppProvider({ children }) {
     setActiveTab(tab);
   };
 
-  // Chat with OpenAI API or fallback
+  // Chat with Claude API or fallback
   const handleSendChat = async () => {
     if (!chatInput.trim()) return;
     const userMessage = chatInput.trim();
@@ -193,42 +193,38 @@ export function AppProvider({ children }) {
     setChatLoading(true);
     analytics.track('Chat Sent', { len: userMessage.length });
 
-    if (OPENAI_API_KEY) {
+    if (CLAUDE_API_KEY) {
       try {
-        const apiMessages = [
-          {
-            role: 'system',
-            content:
-              'You are GutBuddy AI, a friendly gut health and fitness assistant. Give concise, helpful advice about digestive wellness, exercise-gut correlations, and healthy habits. Keep responses under 100 words. Use occasional emojis.',
-          },
-          ...chatMessages
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .slice(-6),
-          { role: 'user', content: userMessage },
-        ];
+        const recentMessages = chatMessages
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .slice(-6)
+          .map((m) => ({ role: m.role, content: m.content }));
+        recentMessages.push({ role: 'user', content: userMessage });
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            'x-api-key': CLAUDE_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: apiMessages,
-            max_tokens: 200,
-            temperature: 0.7,
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 300,
+            system: 'You are GutBuddy AI, a friendly gut health and fitness assistant. Give concise, helpful advice about digestive wellness, exercise-gut correlations, and healthy habits. Keep responses under 100 words. Use occasional emojis.',
+            messages: recentMessages,
           }),
         });
 
         const data = await response.json();
-        if (data.choices?.[0]?.message?.content) {
+        if (data.content?.[0]?.text) {
           setChatMessages((prev) => [
             ...prev,
-            { role: 'assistant', content: data.choices[0].message.content },
+            { role: 'assistant', content: data.content[0].text },
           ]);
         } else {
-          throw new Error('No response');
+          throw new Error(data.error?.message || 'No response');
         }
       } catch (error) {
         setChatMessages((prev) => [
@@ -255,7 +251,7 @@ export function AppProvider({ children }) {
             role: 'assistant',
             content:
               responses[Math.floor(Math.random() * responses.length)] +
-              '\n\n(Offline mode \u2014 connect OpenAI API key for real AI responses)',
+              '\n\n(Offline mode \u2014 connect Claude API key for real AI responses)',
           },
         ]);
       }, 800);
@@ -305,7 +301,7 @@ export function AppProvider({ children }) {
   const nextLevelInfo = getNextLevel();
   const todayExercise = exerciseRecords[new Date().getDate()];
 
-  const isOpenAIConnected = !!OPENAI_API_KEY;
+  const isClaudeConnected = !!CLAUDE_API_KEY;
 
   const value = {
     showOnboarding, setShowOnboarding,
@@ -315,7 +311,7 @@ export function AppProvider({ children }) {
     activeMeal, setActiveMeal,
     currentPlan, setCurrentPlan,
     billingCycle, setBillingCycle,
-    chatMessages, chatInput, setChatInput, handleSendChat, chatLoading, isOpenAIConnected,
+    chatMessages, chatInput, setChatInput, handleSendChat, chatLoading, isClaudeConnected,
     selectedDate, setSelectedDate,
     todayFeeling, setTodayFeeling,
     todayMemo, setTodayMemo,

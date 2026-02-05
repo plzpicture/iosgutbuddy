@@ -23,7 +23,7 @@ export default function InsightsScreen() {
     setChatInput,
     handleSendChat,
     chatLoading,
-    isOpenAIConnected,
+    isClaudeConnected,
   } = useApp();
 
   const patterns = [
@@ -171,17 +171,17 @@ export default function InsightsScreen() {
           <Text style={styles.sectionTitle}>{'\u{1F4AC}'} AI Health Chat</Text>
           <View style={[
             styles.apiStatusBadge,
-            { backgroundColor: isOpenAIConnected ? Colors.greenBg : '#FFF3EC' },
+            { backgroundColor: isClaudeConnected ? Colors.greenBg : '#FFF3EC' },
           ]}>
             <View style={[
               styles.apiStatusDot,
-              { backgroundColor: isOpenAIConnected ? Colors.success : '#FF9800' },
+              { backgroundColor: isClaudeConnected ? Colors.success : '#FF9800' },
             ]} />
             <Text style={[
               styles.apiStatusText,
-              { color: isOpenAIConnected ? Colors.success : '#FF9800' },
+              { color: isClaudeConnected ? Colors.success : '#FF9800' },
             ]}>
-              {isOpenAIConnected ? 'API Connected' : 'Offline Mode'}
+              {isClaudeConnected ? 'API Connected' : 'Offline Mode'}
             </Text>
           </View>
         </View>
