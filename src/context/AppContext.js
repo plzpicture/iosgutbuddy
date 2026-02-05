@@ -1,5 +1,16 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import analytics from '../utils/analytics';
+import { supabase } from '../lib/supabase';
+import {
+  getProfile,
+  updateProfile as updateProfileDB,
+  getDailyRecords,
+  upsertDailyRecord,
+  getExerciseRecords,
+  upsertExerciseRecord,
+  getChatMessages,
+  saveChatMessage,
+} from '../lib/database';
 import {
   levels,
   feelings,
@@ -13,7 +24,11 @@ const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY || '';
 const AppContext = createContext();
 
 export function AppProvider({ children }) {
-  const [showOnboarding, setShowOnboarding] = useState(true);
+  // Auth state
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [userProfile, setUserProfile] = useState({
     nickname: '',
@@ -45,10 +60,10 @@ export function AppProvider({ children }) {
   const [showAnalyticsPanel, setShowAnalyticsPanel] = useState(false);
   const [photos, setPhotos] = useState([]);
 
-  const [userLevel, setUserLevel] = useState(3);
-  const [userExp, setUserExp] = useState(65);
-  const [streak] = useState(7);
-  const [totalDays] = useState(23);
+  const [userLevel, setUserLevel] = useState(1);
+  const [userExp, setUserExp] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [totalDays, setTotalDays] = useState(0);
 
   // Multi-exercise: array of { type, duration, intensity }
   const [selectedExercises, setSelectedExercises] = useState([]);
@@ -58,14 +73,114 @@ export function AppProvider({ children }) {
   const [stravaConnected, setStravaConnected] = useState(false);
   const [showStravaModal, setShowStravaModal] = useState(false);
 
-  const [exerciseRecords, setExerciseRecords] = useState(initialExerciseRecords);
-  const [dailyRecords, setDailyRecords] = useState(initialDailyRecords);
+  const [exerciseRecords, setExerciseRecords] = useState({});
+  const [dailyRecords, setDailyRecords] = useState({});
 
+  // ── Auth listener ──────────────────────────────────────
   useEffect(() => {
-    analytics.track('App Opened');
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Handlers
+  // ── Load user data from Supabase when session changes ──
+  const loadUserData = useCallback(async (userId) => {
+    try {
+      // Load profile
+      const profile = await getProfile(userId);
+      if (profile) {
+        setUserProfile({
+          nickname: profile.nickname || '',
+          gender: profile.gender || '',
+          goal: profile.goal || '',
+          issues: profile.issues || [],
+          stoolFrequency: profile.stool_frequency || '',
+          notificationTime: profile.notification_time || '09:00',
+        });
+        setUserLevel(profile.level || 1);
+        setUserExp(profile.exp || 0);
+        setStreak(profile.streak || 0);
+        setCurrentPlan(profile.current_plan || 'Basic');
+        setBillingCycle(profile.billing_cycle || 'monthly');
+        setStravaConnected(profile.strava_connected || false);
+        setShowOnboarding(!profile.onboarding_completed);
+      }
+
+      // Load daily records → convert to { day: { feeling, score, memo, stoolCount } }
+      const dailyData = await getDailyRecords(userId);
+      const dailyMap = {};
+      dailyData.forEach((r) => {
+        const day = new Date(r.date).getDate();
+        dailyMap[day] = {
+          feeling: r.feeling,
+          score: r.score,
+          memo: r.memo,
+          stoolCount: r.stool_count,
+        };
+      });
+      setDailyRecords(Object.keys(dailyMap).length > 0 ? dailyMap : initialDailyRecords);
+      setTotalDays(Object.keys(dailyMap).length || Object.keys(initialDailyRecords).length);
+
+      // Load exercise records
+      const exerciseData = await getExerciseRecords(userId);
+      const exerciseMap = {};
+      exerciseData.forEach((r) => {
+        const day = new Date(r.date).getDate();
+        exerciseMap[day] = {
+          exercises: r.exercises || [],
+          type: r.exercises?.[0]?.type || 'run',
+          duration: r.total_duration,
+          intensity: r.exercises?.[0]?.intensity || 'moderate',
+          calories: r.total_calories,
+          source: r.source,
+        };
+      });
+      setExerciseRecords(
+        Object.keys(exerciseMap).length > 0 ? exerciseMap : initialExerciseRecords
+      );
+
+      // Load chat messages
+      const msgs = await getChatMessages(userId);
+      if (msgs.length > 0) {
+        setChatMessages(msgs.map((m) => ({ role: m.role, content: m.content })));
+      }
+    } catch (error) {
+      console.log('Error loading user data:', error.message);
+      // Use initial data as fallback
+      setDailyRecords(initialDailyRecords);
+      setExerciseRecords(initialExerciseRecords);
+      setShowOnboarding(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      loadUserData(session.user.id);
+      analytics.track('App Opened', { userId: session.user.id });
+    }
+  }, [session, loadUserData]);
+
+  // ── Sign out ───────────────────────────────────────────
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setChatMessages([
+      {
+        role: 'assistant',
+        content:
+          "Hi! I'm your gut health AI assistant. Ask me anything about digestive wellness or how exercise affects your gut! \u{1F33F}",
+      },
+    ]);
+  };
+
+  // ── Handlers ───────────────────────────────────────────
   const updateProfile = (field, value) =>
     setUserProfile((prev) => ({ ...prev, [field]: value }));
 
@@ -77,6 +192,25 @@ export function AppProvider({ children }) {
         : [...prev.issues, value],
     }));
 
+  const completeOnboarding = async () => {
+    setShowOnboarding(false);
+    if (session?.user?.id) {
+      try {
+        await updateProfileDB(session.user.id, {
+          nickname: userProfile.nickname,
+          gender: userProfile.gender,
+          goal: userProfile.goal,
+          issues: userProfile.issues,
+          stool_frequency: userProfile.stoolFrequency,
+          notification_time: userProfile.notificationTime,
+          onboarding_completed: true,
+        });
+      } catch (error) {
+        console.log('Error saving profile:', error.message);
+      }
+    }
+  };
+
   const getCurrentLevel = () => levels.find((l) => l.level === userLevel) || levels[0];
   const getNextLevel = () => levels.find((l) => l.level === userLevel + 1);
   const getExpProgress = () => {
@@ -85,23 +219,40 @@ export function AppProvider({ children }) {
     return n ? Math.min(100, Math.round(((userExp - c.exp) / (n.exp - c.exp)) * 100)) : 100;
   };
 
-  const saveTodayRecord = () => {
+  const saveTodayRecord = async () => {
     if (!todayFeeling) return;
     const today = new Date().getDate();
     const fd = feelings.find((f) => `${f.emoji} ${f.label}` === todayFeeling);
-    setDailyRecords((prev) => ({
-      ...prev,
-      [today]: {
-        feeling: todayFeeling,
-        score: fd?.score || 70,
-        memo: todayMemo,
-        stoolCount: todayStoolCount,
-      },
-    }));
-    setUserExp((prev) => Math.min(prev + 5, 500));
+    const record = {
+      feeling: todayFeeling,
+      score: fd?.score || 70,
+      memo: todayMemo,
+      stoolCount: todayStoolCount,
+    };
+    setDailyRecords((prev) => ({ ...prev, [today]: record }));
+
+    const newExp = Math.min(userExp + 5, 500);
+    setUserExp(newExp);
     analytics.track('Daily Log Saved', { feeling: todayFeeling, stoolCount: todayStoolCount });
     setShowSaved(true);
     setTimeout(() => setShowSaved(false), 2000);
+
+    // Persist to Supabase
+    if (session?.user?.id) {
+      const dateStr = new Date().toISOString().split('T')[0];
+      try {
+        await upsertDailyRecord(session.user.id, {
+          date: dateStr,
+          feeling: todayFeeling,
+          score: fd?.score || 70,
+          memo: todayMemo,
+          stool_count: todayStoolCount,
+        });
+        await updateProfileDB(session.user.id, { exp: newExp });
+      } catch (error) {
+        console.log('Error saving daily record:', error.message);
+      }
+    }
   };
 
   // Multi-exercise handlers
@@ -127,13 +278,13 @@ export function AppProvider({ children }) {
     );
   };
 
-  const saveExercise = () => {
+  const saveExercise = async () => {
     if (selectedExercises.length === 0) return;
     const today = new Date().getDate();
     const calMap = { run: 9, walk: 4, cycle: 7, swim: 8, yoga: 3, strength: 6 };
     const intMult = { light: 0.7, moderate: 1, hard: 1.3, extreme: 1.6 };
 
-    const totalDuration = selectedExercises.reduce((a, e) => a + e.duration, 0);
+    const totalDurationVal = selectedExercises.reduce((a, e) => a + e.duration, 0);
     const totalCal = selectedExercises.reduce((a, e) => {
       return a + Math.round((calMap[e.type] || 5) * e.duration * (intMult[e.intensity] || 1));
     }, 0);
@@ -143,20 +294,40 @@ export function AppProvider({ children }) {
       [today]: {
         exercises: selectedExercises,
         type: selectedExercises[0].type,
-        duration: totalDuration,
+        duration: totalDurationVal,
         intensity: selectedExercises[0].intensity,
         calories: totalCal,
         source: 'manual',
       },
     }));
-    setUserExp((prev) => Math.min(prev + 3, 500));
+
+    const newExp = Math.min(userExp + 3, 500);
+    setUserExp(newExp);
     analytics.track('Exercise Logged', {
       count: selectedExercises.length,
-      totalDuration,
+      totalDuration: totalDurationVal,
       calories: totalCal,
     });
     setShowExerciseSaved(true);
     setTimeout(() => setShowExerciseSaved(false), 2000);
+
+    // Persist to Supabase
+    if (session?.user?.id) {
+      const dateStr = new Date().toISOString().split('T')[0];
+      try {
+        await upsertExerciseRecord(session.user.id, {
+          date: dateStr,
+          exercises: selectedExercises,
+          total_duration: totalDurationVal,
+          total_calories: totalCal,
+          source: 'manual',
+        });
+        await updateProfileDB(session.user.id, { exp: newExp });
+      } catch (error) {
+        console.log('Error saving exercise:', error.message);
+      }
+    }
+
     setSelectedExercises([]);
   };
 
@@ -172,10 +343,17 @@ export function AppProvider({ children }) {
   const handleStravaConnect = () => {
     analytics.track('Strava Connect Clicked');
     setShowStravaModal(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       setStravaConnected(true);
       setShowStravaModal(false);
       analytics.track('Strava Connected');
+      if (session?.user?.id) {
+        try {
+          await updateProfileDB(session.user.id, { strava_connected: true });
+        } catch (error) {
+          console.log('Error updating strava:', error.message);
+        }
+      }
     }, 2000);
   };
 
@@ -192,6 +370,11 @@ export function AppProvider({ children }) {
     setChatInput('');
     setChatLoading(true);
     analytics.track('Chat Sent', { len: userMessage.length });
+
+    // Save user message to Supabase
+    if (session?.user?.id) {
+      saveChatMessage(session.user.id, 'user', userMessage).catch(() => {});
+    }
 
     if (CLAUDE_API_KEY) {
       try {
@@ -212,32 +395,31 @@ export function AppProvider({ children }) {
           body: JSON.stringify({
             model: 'claude-sonnet-4-20250514',
             max_tokens: 300,
-            system: 'You are GutBuddy AI, a friendly gut health and fitness assistant. Give concise, helpful advice about digestive wellness, exercise-gut correlations, and healthy habits. Keep responses under 100 words. Use occasional emojis.',
+            system:
+              'You are GutBuddy AI, a friendly gut health and fitness assistant. Give concise, helpful advice about digestive wellness, exercise-gut correlations, and healthy habits. Keep responses under 100 words. Use occasional emojis.',
             messages: recentMessages,
           }),
         });
 
         const data = await response.json();
         if (data.content?.[0]?.text) {
+          const assistantMsg = data.content[0].text;
           setChatMessages((prev) => [
             ...prev,
-            { role: 'assistant', content: data.content[0].text },
+            { role: 'assistant', content: assistantMsg },
           ]);
+          if (session?.user?.id) {
+            saveChatMessage(session.user.id, 'assistant', assistantMsg).catch(() => {});
+          }
         } else {
           throw new Error(data.error?.message || 'No response');
         }
       } catch (error) {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              'Sorry, I had trouble connecting. Please check your API key or try again later.',
-          },
-        ]);
+        const errMsg =
+          'Sorry, I had trouble connecting. Please check your API key or try again later.';
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: errMsg }]);
       }
     } else {
-      // Fallback mock responses when no API key
       setTimeout(() => {
         const responses = [
           'Based on your data, morning runs correlate with 12% better gut scores the next day! Try maintaining your 7AM routine. \u{1F3C3}',
@@ -245,15 +427,10 @@ export function AppProvider({ children }) {
           'Your best gut days happen when you combine moderate exercise (30min) with 7+ hours of sleep. Keep it up! \u{1F634}',
           'Yoga days show the lowest bloating reports. Consider adding 2-3 yoga sessions per week for gut comfort. \u{1F9D8}',
         ];
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              responses[Math.floor(Math.random() * responses.length)] +
-              '\n\n(Offline mode \u2014 connect Claude API key for real AI responses)',
-          },
-        ]);
+        const fallbackMsg =
+          responses[Math.floor(Math.random() * responses.length)] +
+          '\n\n(Offline mode \u2014 connect Claude API key for real AI responses)';
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: fallbackMsg }]);
       }, 800);
     }
     setChatLoading(false);
@@ -261,9 +438,9 @@ export function AppProvider({ children }) {
 
   // Computed values
   const gutHealth = 72;
-  const totalRecords = Object.keys(dailyRecords).length;
+  const totalRecords = Math.max(1, Object.keys(dailyRecords).length);
   const monthlyAvg = Math.round(
-    Object.values(dailyRecords).reduce((a, r) => a + r.score, 0) / totalRecords
+    Object.values(dailyRecords).reduce((a, r) => a + (r.score || 0), 0) / totalRecords
   );
   const goodDays = Object.values(dailyRecords).filter((r) => r.score >= 75).length;
   const okayDays = Object.values(dailyRecords).filter(
@@ -273,11 +450,14 @@ export function AppProvider({ children }) {
   const goodPct = Math.round((goodDays / totalRecords) * 100);
   const okayPct = Math.round((okayDays / totalRecords) * 100);
   const badPct = Math.round((badDays / totalRecords) * 100);
-  const totalBowel = Object.values(dailyRecords).reduce((a, r) => a + r.stoolCount, 0);
-  const totalExerciseDays = Object.keys(exerciseRecords).length;
-  const totalCalories = Object.values(exerciseRecords).reduce((a, r) => a + r.calories, 0);
+  const totalBowel = Object.values(dailyRecords).reduce((a, r) => a + (r.stoolCount || 0), 0);
+  const totalExerciseDays = Math.max(1, Object.keys(exerciseRecords).length);
+  const totalCalories = Object.values(exerciseRecords).reduce(
+    (a, r) => a + (r.calories || 0),
+    0
+  );
   const avgDuration = Math.round(
-    Object.values(exerciseRecords).reduce((a, r) => a + r.duration, 0) / totalExerciseDays
+    Object.values(exerciseRecords).reduce((a, r) => a + (r.duration || 0), 0) / totalExerciseDays
   );
 
   const exerciseDayScores = Object.keys(exerciseRecords)
@@ -304,7 +484,9 @@ export function AppProvider({ children }) {
   const isClaudeConnected = !!CLAUDE_API_KEY;
 
   const value = {
-    showOnboarding, setShowOnboarding,
+    // Auth
+    session, authLoading, signOut,
+    showOnboarding, setShowOnboarding, completeOnboarding,
     onboardingStep, setOnboardingStep,
     userProfile, updateProfile, toggleIssue,
     activeTab, handleTabChange,

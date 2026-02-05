@@ -28,6 +28,8 @@ export default function ProfileScreen() {
     setBillingCycle,
     showAnalyticsPanel,
     setShowAnalyticsPanel,
+    signOut,
+    session,
   } = useApp();
 
   const plans = [
@@ -375,6 +377,22 @@ export default function ProfileScreen() {
           ))}
         </View>
       )}
+      {/* Sign Out */}
+      <TouchableOpacity
+        onPress={() => {
+          Alert.alert('Sign Out', 'Are you sure?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Sign Out', style: 'destructive', onPress: signOut },
+          ]);
+        }}
+        style={styles.signOutButton}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.signOutText}>Sign Out</Text>
+        {session?.user?.email && (
+          <Text style={styles.signOutEmail}>{session.user.email}</Text>
+        )}
+      </TouchableOpacity>
       <View style={{ height: 20 }} />
     </ScrollView>
   );
@@ -667,5 +685,24 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 10,
     fontFamily: 'monospace',
+  },
+  signOutButton: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  signOutText: {
+    color: '#FF3B30',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signOutEmail: {
+    color: '#999',
+    fontSize: 11,
+    marginTop: 4,
   },
 });

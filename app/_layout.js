@@ -1,14 +1,36 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AppProvider, useApp } from '../src/context/AppContext';
+import AuthScreen from '../src/screens/AuthScreen';
 import OnboardingScreen from '../src/screens/OnboardingScreen';
 import { Colors } from '../src/constants/theme';
 
 function RootLayoutInner() {
-  const { showOnboarding, showStravaModal } = useApp();
+  const { session, authLoading, showOnboarding, showStravaModal } = useApp();
 
+  // Loading state
+  if (authLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
+
+  // Not logged in → show auth screen
+  if (!session) {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <AuthScreen />
+      </>
+    );
+  }
+
+  // Logged in but onboarding not complete
   if (showOnboarding) {
     return (
       <>
@@ -48,6 +70,17 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#999',
+  },
   modalOverlay: {
     position: 'absolute',
     top: 0,

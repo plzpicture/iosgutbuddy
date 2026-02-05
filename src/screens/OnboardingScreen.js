@@ -20,7 +20,7 @@ export default function OnboardingScreen() {
     userProfile,
     updateProfile,
     toggleIssue,
-    setShowOnboarding,
+    completeOnboarding,
   } = useApp();
 
   const q = onboardingQuestions[onboardingStep];
@@ -38,7 +38,7 @@ export default function OnboardingScreen() {
       setOnboardingStep((prev) => prev + 1);
     } else {
       analytics.track('Onboarding Completed');
-      setShowOnboarding(false);
+      completeOnboarding();
     }
   };
 
