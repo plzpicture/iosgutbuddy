@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../context/AppContext';
@@ -21,6 +22,8 @@ export default function InsightsScreen() {
     chatInput,
     setChatInput,
     handleSendChat,
+    chatLoading,
+    isOpenAIConnected,
   } = useApp();
 
   const patterns = [
@@ -164,7 +167,24 @@ export default function InsightsScreen() {
 
       {/* AI Chat */}
       <Card>
-        <Text style={styles.sectionTitle}>{'\u{1F4AC}'} AI Health Chat</Text>
+        <View style={styles.chatHeader}>
+          <Text style={styles.sectionTitle}>{'\u{1F4AC}'} AI Health Chat</Text>
+          <View style={[
+            styles.apiStatusBadge,
+            { backgroundColor: isOpenAIConnected ? Colors.greenBg : '#FFF3EC' },
+          ]}>
+            <View style={[
+              styles.apiStatusDot,
+              { backgroundColor: isOpenAIConnected ? Colors.success : '#FF9800' },
+            ]} />
+            <Text style={[
+              styles.apiStatusText,
+              { color: isOpenAIConnected ? Colors.success : '#FF9800' },
+            ]}>
+              {isOpenAIConnected ? 'API Connected' : 'Offline Mode'}
+            </Text>
+          </View>
+        </View>
         <View style={styles.chatContainer}>
           <ScrollView style={styles.chatScroll} nestedScrollEnabled>
             {chatMessages.map((m, i) => (
@@ -193,6 +213,12 @@ export default function InsightsScreen() {
                 )}
               </View>
             ))}
+            {chatLoading && (
+              <View style={styles.chatLoadingContainer}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.chatLoadingText}>Thinking...</Text>
+              </View>
+            )}
           </ScrollView>
         </View>
         <View style={styles.chatInputRow}>
@@ -204,10 +230,15 @@ export default function InsightsScreen() {
             placeholderTextColor="#bbb"
             style={styles.chatInput}
             returnKeyType="send"
+            editable={!chatLoading}
           />
-          <TouchableOpacity onPress={handleSendChat} activeOpacity={0.8}>
+          <TouchableOpacity
+            onPress={handleSendChat}
+            activeOpacity={0.8}
+            disabled={chatLoading}
+          >
             <LinearGradient
-              colors={[Colors.primary, Colors.primaryDark]}
+              colors={chatLoading ? ['#ccc', '#ccc'] : [Colors.primary, Colors.primaryDark]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.chatSendButton}
@@ -396,6 +427,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   // Chat
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 0,
+  },
+  apiStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  apiStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  apiStatusText: {
+    fontSize: 9,
+    fontWeight: '600',
+  },
   chatContainer: {
     height: 180,
     marginBottom: 12,
@@ -431,6 +486,17 @@ const styles = StyleSheet.create({
     color: '#333',
     fontSize: 12,
     lineHeight: 18,
+  },
+  chatLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    alignSelf: 'flex-start',
+  },
+  chatLoadingText: {
+    fontSize: 12,
+    color: '#999',
   },
   chatInputRow: {
     flexDirection: 'row',

@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../context/AppContext';
 import { levels } from '../constants/data';
-import { Colors, Shadows } from '../constants/theme';
+import { Colors } from '../constants/theme';
 import Card from '../components/Card';
+import GradientButton from '../components/GradientButton';
 import analytics from '../utils/analytics';
 
 export default function ProfileScreen() {
@@ -23,9 +24,60 @@ export default function ProfileScreen() {
     handleStravaConnect,
     currentPlan,
     setCurrentPlan,
+    billingCycle,
+    setBillingCycle,
     showAnalyticsPanel,
     setShowAnalyticsPanel,
   } = useApp();
+
+  const plans = [
+    {
+      id: 'Basic',
+      monthlyPrice: 'Free',
+      annualPrice: 'Free',
+      color: '#999',
+      desc: '1 analysis/day',
+    },
+    {
+      id: 'Pro',
+      monthlyPrice: '$9.99/mo',
+      annualPrice: '$79.99/yr',
+      annualSave: 'Save 33%',
+      color: Colors.primary,
+      badge: 'Popular',
+      desc: 'Unlimited + AI correlation',
+    },
+    {
+      id: 'Family',
+      monthlyPrice: '$19.99/mo',
+      annualPrice: '$149.99/yr',
+      annualSave: 'Save 37%',
+      color: Colors.purple,
+      badge: 'Best',
+      desc: 'Up to 5 members',
+    },
+  ];
+
+  const handlePurchase = (plan) => {
+    setCurrentPlan(plan.id);
+    if (plan.id === 'Basic') return;
+    const price = billingCycle === 'monthly' ? plan.monthlyPrice : plan.annualPrice;
+    analytics.track('Plan Selected', { plan: plan.id, billingCycle, price });
+    Alert.alert(
+      'Subscribe',
+      `Subscribe to ${plan.id} for ${price}?\n\nThis will be charged to your Apple ID.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Subscribe',
+          onPress: () => {
+            analytics.track('Purchase Initiated', { plan: plan.id, billingCycle });
+            Alert.alert('Success', `You are now subscribed to ${plan.id}!`);
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -210,47 +262,88 @@ export default function ProfileScreen() {
       {/* Plans */}
       <Card>
         <Text style={styles.sectionTitle}>{'\u2B50'} Plans</Text>
-        {[
-          { id: 'Basic', price: 'Free', color: '#999', desc: '1 analysis/day' },
-          {
-            id: 'Pro',
-            price: '$9.99/mo',
-            color: Colors.primary,
-            badge: 'Popular',
-            desc: 'Unlimited + AI correlation',
-          },
-          {
-            id: 'Family',
-            price: '$19.99/mo',
-            color: Colors.purple,
-            badge: 'Best',
-            desc: 'Up to 5 members',
-          },
-        ].map((plan) => (
+
+        {/* Billing Cycle Toggle */}
+        <View style={styles.billingToggleContainer}>
           <TouchableOpacity
-            key={plan.id}
-            onPress={() => setCurrentPlan(plan.id)}
+            onPress={() => setBillingCycle('monthly')}
             style={[
-              styles.planRow,
-              {
-                borderWidth: currentPlan === plan.id ? 2 : 1,
-                borderColor: currentPlan === plan.id ? plan.color : '#eee',
-              },
+              styles.billingToggleButton,
+              billingCycle === 'monthly' && styles.billingToggleActive,
             ]}
             activeOpacity={0.7}
           >
-            {plan.badge && (
-              <View style={[styles.planBadge, { backgroundColor: plan.color }]}>
-                <Text style={styles.planBadgeText}>{plan.badge}</Text>
+            <Text style={[
+              styles.billingToggleText,
+              billingCycle === 'monthly' && styles.billingToggleTextActive,
+            ]}>
+              Monthly
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setBillingCycle('annual')}
+            style={[
+              styles.billingToggleButton,
+              billingCycle === 'annual' && styles.billingToggleActive,
+            ]}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.billingToggleText,
+              billingCycle === 'annual' && styles.billingToggleTextActive,
+            ]}>
+              Annual
+            </Text>
+            {billingCycle !== 'annual' && (
+              <View style={styles.saveBadge}>
+                <Text style={styles.saveBadgeText}>Save 33%+</Text>
               </View>
             )}
-            <View style={styles.planInfo}>
-              <Text style={[styles.planName, { color: plan.color }]}>{plan.id}</Text>
-              <Text style={styles.planDesc}>{plan.desc}</Text>
-            </View>
-            <Text style={styles.planPrice}>{plan.price}</Text>
           </TouchableOpacity>
-        ))}
+        </View>
+
+        {plans.map((plan) => {
+          const price = billingCycle === 'monthly' ? plan.monthlyPrice : plan.annualPrice;
+          return (
+            <TouchableOpacity
+              key={plan.id}
+              onPress={() => handlePurchase(plan)}
+              style={[
+                styles.planRow,
+                {
+                  borderWidth: currentPlan === plan.id ? 2 : 1,
+                  borderColor: currentPlan === plan.id ? plan.color : '#eee',
+                },
+              ]}
+              activeOpacity={0.7}
+            >
+              {plan.badge && (
+                <View style={[styles.planBadge, { backgroundColor: plan.color }]}>
+                  <Text style={styles.planBadgeText}>{plan.badge}</Text>
+                </View>
+              )}
+              <View style={styles.planInfo}>
+                <Text style={[styles.planName, { color: plan.color }]}>{plan.id}</Text>
+                <Text style={styles.planDesc}>{plan.desc}</Text>
+              </View>
+              <View style={styles.planPriceContainer}>
+                <Text style={styles.planPrice}>{price}</Text>
+                {billingCycle === 'annual' && plan.annualSave && (
+                  <Text style={[styles.planSaveLabel, { color: plan.color }]}>
+                    {plan.annualSave}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        {currentPlan !== 'Basic' && (
+          <GradientButton
+            title={`\u{1F4B3} Subscribe to ${currentPlan}`}
+            onPress={() => handlePurchase(plans.find((p) => p.id === currentPlan))}
+          />
+        )}
       </Card>
 
       {/* Analytics Button */}
@@ -445,6 +538,51 @@ const styles = StyleSheet.create({
   badgeIcon: {
     fontSize: 20,
   },
+  // Billing Toggle
+  billingToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#f0ebe3',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 14,
+  },
+  billingToggleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  billingToggleActive: {
+    backgroundColor: Colors.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  billingToggleText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#999',
+  },
+  billingToggleTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  saveBadge: {
+    backgroundColor: Colors.success,
+    paddingVertical: 1,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+  },
+  saveBadgeText: {
+    color: Colors.white,
+    fontSize: 8,
+    fontWeight: '700',
+  },
   // Plans
   planRow: {
     padding: 12,
@@ -480,9 +618,17 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 2,
   },
+  planPriceContainer: {
+    alignItems: 'flex-end',
+  },
   planPrice: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  planSaveLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    marginTop: 2,
   },
   // Analytics
   analyticsButton: {

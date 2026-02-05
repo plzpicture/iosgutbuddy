@@ -1,10 +1,20 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Alert,
+  Platform,
+  ActionSheetIOS,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
 import { getExerciseIcon, getExerciseLabel } from '../constants/data';
-import { Colors, Shadows } from '../constants/theme';
+import { Colors } from '../constants/theme';
 import Card from '../components/Card';
 import CircularProgress from '../components/CircularProgress';
 import GradientButton from '../components/GradientButton';
@@ -21,8 +31,62 @@ export default function HomeScreen() {
     avgExerciseGut,
     avgNoExerciseGut,
     totalExerciseDays,
-    handleTabChange,
+    addPhoto,
   } = useApp();
+
+  const pickImage = async (source) => {
+    let result;
+    if (source === 'camera') {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera permission is required to take photos.');
+        return;
+      }
+      result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Photo library permission is required.');
+        return;
+      }
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+    }
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      addPhoto(result.assets[0].uri);
+      analytics.track('Stool Analysis Photo Added');
+      router.push('/log');
+    }
+  };
+
+  const handleQuickStoolAnalysis = () => {
+    analytics.track('Stool Analysis Clicked');
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take Photo', 'Choose from Library'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) pickImage('camera');
+          else if (buttonIndex === 2) pickImage('library');
+        }
+      );
+    } else {
+      Alert.alert('Quick Stool Analysis', 'Choose an option', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Take Photo', onPress: () => pickImage('camera') },
+        { text: 'Choose from Library', onPress: () => pickImage('library') },
+      ]);
+    }
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -153,7 +217,7 @@ export default function HomeScreen() {
       {/* Quick Analysis Button */}
       <GradientButton
         title={'\u{1F6BD} Quick Stool Analysis'}
-        onPress={() => analytics.track('Stool Analysis Clicked')}
+        onPress={handleQuickStoolAnalysis}
       />
       <View style={{ height: 20 }} />
     </ScrollView>

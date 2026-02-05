@@ -3,9 +3,12 @@ import analytics from '../utils/analytics';
 import {
   levels,
   feelings,
+  exerciseTypes,
   initialExerciseRecords,
   initialDailyRecords,
 } from '../constants/data';
+
+const OPENAI_API_KEY = ''; // Set your OpenAI API key here
 
 const AppContext = createContext();
 
@@ -24,6 +27,7 @@ export function AppProvider({ children }) {
   const [activeTab, setActiveTab] = useState('home');
   const [activeMeal, setActiveMeal] = useState('lunch');
   const [currentPlan, setCurrentPlan] = useState('Basic');
+  const [billingCycle, setBillingCycle] = useState('monthly');
   const [chatMessages, setChatMessages] = useState([
     {
       role: 'assistant',
@@ -32,25 +36,27 @@ export function AppProvider({ children }) {
     },
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().getDate());
   const [todayFeeling, setTodayFeeling] = useState('');
   const [todayMemo, setTodayMemo] = useState('');
   const [todayStoolCount, setTodayStoolCount] = useState(0);
   const [showSaved, setShowSaved] = useState(false);
   const [showAnalyticsPanel, setShowAnalyticsPanel] = useState(false);
+  const [photos, setPhotos] = useState([]);
 
   const [userLevel, setUserLevel] = useState(3);
   const [userExp, setUserExp] = useState(65);
   const [streak] = useState(7);
   const [totalDays] = useState(23);
 
-  // Fitness state
+  // Multi-exercise: array of { type, duration, intensity }
+  const [selectedExercises, setSelectedExercises] = useState([]);
+  const [showExerciseSaved, setShowExerciseSaved] = useState(false);
+
+  // Fitness
   const [stravaConnected, setStravaConnected] = useState(false);
   const [showStravaModal, setShowStravaModal] = useState(false);
-  const [exerciseType, setExerciseType] = useState('');
-  const [exerciseDuration, setExerciseDuration] = useState(30);
-  const [exerciseIntensity, setExerciseIntensity] = useState('');
-  const [showExerciseSaved, setShowExerciseSaved] = useState(false);
 
   const [exerciseRecords, setExerciseRecords] = useState(initialExerciseRecords);
   const [dailyRecords, setDailyRecords] = useState(initialDailyRecords);
@@ -98,35 +104,69 @@ export function AppProvider({ children }) {
     setTimeout(() => setShowSaved(false), 2000);
   };
 
+  // Multi-exercise handlers
+  const toggleExerciseType = (type) => {
+    setSelectedExercises((prev) => {
+      const exists = prev.find((e) => e.type === type);
+      if (exists) {
+        return prev.filter((e) => e.type !== type);
+      }
+      return [...prev, { type, duration: 30, intensity: 'moderate' }];
+    });
+  };
+
+  const updateExerciseDuration = (type, duration) => {
+    setSelectedExercises((prev) =>
+      prev.map((e) => (e.type === type ? { ...e, duration } : e))
+    );
+  };
+
+  const updateExerciseIntensity = (type, intensity) => {
+    setSelectedExercises((prev) =>
+      prev.map((e) => (e.type === type ? { ...e, intensity } : e))
+    );
+  };
+
   const saveExercise = () => {
-    if (!exerciseType || !exerciseIntensity) return;
+    if (selectedExercises.length === 0) return;
     const today = new Date().getDate();
     const calMap = { run: 9, walk: 4, cycle: 7, swim: 8, yoga: 3, strength: 6 };
     const intMult = { light: 0.7, moderate: 1, hard: 1.3, extreme: 1.6 };
-    const cal = Math.round(
-      (calMap[exerciseType] || 5) * exerciseDuration * (intMult[exerciseIntensity] || 1)
-    );
+
+    const totalDuration = selectedExercises.reduce((a, e) => a + e.duration, 0);
+    const totalCal = selectedExercises.reduce((a, e) => {
+      return a + Math.round((calMap[e.type] || 5) * e.duration * (intMult[e.intensity] || 1));
+    }, 0);
+
     setExerciseRecords((prev) => ({
       ...prev,
       [today]: {
-        type: exerciseType,
-        duration: exerciseDuration,
-        intensity: exerciseIntensity,
-        calories: cal,
+        exercises: selectedExercises,
+        type: selectedExercises[0].type,
+        duration: totalDuration,
+        intensity: selectedExercises[0].intensity,
+        calories: totalCal,
         source: 'manual',
       },
     }));
     setUserExp((prev) => Math.min(prev + 3, 500));
     analytics.track('Exercise Logged', {
-      type: exerciseType,
-      duration: exerciseDuration,
-      intensity: exerciseIntensity,
-      calories: cal,
+      count: selectedExercises.length,
+      totalDuration,
+      calories: totalCal,
     });
     setShowExerciseSaved(true);
     setTimeout(() => setShowExerciseSaved(false), 2000);
-    setExerciseType('');
-    setExerciseIntensity('');
+    setSelectedExercises([]);
+  };
+
+  // Photo handlers
+  const addPhoto = (uri) => {
+    setPhotos((prev) => [...prev, uri]);
+  };
+
+  const removePhoto = (index) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleStravaConnect = () => {
@@ -144,24 +184,83 @@ export function AppProvider({ children }) {
     setActiveTab(tab);
   };
 
-  const handleSendChat = () => {
+  // Chat with OpenAI API or fallback
+  const handleSendChat = async () => {
     if (!chatInput.trim()) return;
-    setChatMessages((prev) => [...prev, { role: 'user', content: chatInput }]);
-    const q = chatInput;
+    const userMessage = chatInput.trim();
+    setChatMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setChatInput('');
-    analytics.track('Chat Sent', { len: q.length });
-    setTimeout(() => {
-      const responses = [
-        'Based on your data, morning runs correlate with 12% better gut scores the next day! Try maintaining your 7AM routine. \u{1F3C3}',
-        'I notice your gut score drops after high-intensity workouts. Try eating easily digestible foods on those days. \u{1F963}',
-        'Your best gut days happen when you combine moderate exercise (30min) with 7+ hours of sleep. Keep it up! \u{1F634}',
-        'Yoga days show the lowest bloating reports. Consider adding 2-3 yoga sessions per week for gut comfort. \u{1F9D8}',
-      ];
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: responses[Math.floor(Math.random() * responses.length)] },
-      ]);
-    }, 1000);
+    setChatLoading(true);
+    analytics.track('Chat Sent', { len: userMessage.length });
+
+    if (OPENAI_API_KEY) {
+      try {
+        const apiMessages = [
+          {
+            role: 'system',
+            content:
+              'You are GutBuddy AI, a friendly gut health and fitness assistant. Give concise, helpful advice about digestive wellness, exercise-gut correlations, and healthy habits. Keep responses under 100 words. Use occasional emojis.',
+          },
+          ...chatMessages
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .slice(-6),
+          { role: 'user', content: userMessage },
+        ];
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: apiMessages,
+            max_tokens: 200,
+            temperature: 0.7,
+          }),
+        });
+
+        const data = await response.json();
+        if (data.choices?.[0]?.message?.content) {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: 'assistant', content: data.choices[0].message.content },
+          ]);
+        } else {
+          throw new Error('No response');
+        }
+      } catch (error) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content:
+              'Sorry, I had trouble connecting. Please check your API key or try again later.',
+          },
+        ]);
+      }
+    } else {
+      // Fallback mock responses when no API key
+      setTimeout(() => {
+        const responses = [
+          'Based on your data, morning runs correlate with 12% better gut scores the next day! Try maintaining your 7AM routine. \u{1F3C3}',
+          'I notice your gut score drops after high-intensity workouts. Try eating easily digestible foods on those days. \u{1F963}',
+          'Your best gut days happen when you combine moderate exercise (30min) with 7+ hours of sleep. Keep it up! \u{1F634}',
+          'Yoga days show the lowest bloating reports. Consider adding 2-3 yoga sessions per week for gut comfort. \u{1F9D8}',
+        ];
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content:
+              responses[Math.floor(Math.random() * responses.length)] +
+              '\n\n(Offline mode \u2014 connect OpenAI API key for real AI responses)',
+          },
+        ]);
+      }, 800);
+    }
+    setChatLoading(false);
   };
 
   // Computed values
@@ -206,86 +305,34 @@ export function AppProvider({ children }) {
   const nextLevelInfo = getNextLevel();
   const todayExercise = exerciseRecords[new Date().getDate()];
 
+  const isOpenAIConnected = !!OPENAI_API_KEY;
+
   const value = {
-    // Onboarding
-    showOnboarding,
-    setShowOnboarding,
-    onboardingStep,
-    setOnboardingStep,
-    userProfile,
-    updateProfile,
-    toggleIssue,
-    // Navigation
-    activeTab,
-    handleTabChange,
-    // Meal
-    activeMeal,
-    setActiveMeal,
-    // Plan
-    currentPlan,
-    setCurrentPlan,
-    // Chat
-    chatMessages,
-    chatInput,
-    setChatInput,
-    handleSendChat,
-    // Calendar
-    selectedDate,
-    setSelectedDate,
-    // Daily log
-    todayFeeling,
-    setTodayFeeling,
-    todayMemo,
-    setTodayMemo,
-    todayStoolCount,
-    setTodayStoolCount,
-    showSaved,
-    saveTodayRecord,
-    // Analytics panel
-    showAnalyticsPanel,
-    setShowAnalyticsPanel,
-    // Level
-    userLevel,
-    userExp,
-    streak,
-    totalDays,
-    currentLevelInfo,
-    nextLevelInfo,
-    getExpProgress,
-    // Fitness
-    stravaConnected,
-    setStravaConnected,
-    showStravaModal,
-    exerciseType,
-    setExerciseType,
-    exerciseDuration,
-    setExerciseDuration,
-    exerciseIntensity,
-    setExerciseIntensity,
-    showExerciseSaved,
-    saveExercise,
-    handleStravaConnect,
-    // Records
-    exerciseRecords,
-    dailyRecords,
-    // Computed
-    gutHealth,
-    totalRecords,
-    monthlyAvg,
-    goodDays,
-    okayDays,
-    badDays,
-    goodPct,
-    okayPct,
-    badPct,
-    totalBowel,
-    totalExerciseDays,
-    totalCalories,
-    avgDuration,
-    avgExerciseGut,
-    avgNoExerciseGut,
-    correlationScore,
-    todayExercise,
+    showOnboarding, setShowOnboarding,
+    onboardingStep, setOnboardingStep,
+    userProfile, updateProfile, toggleIssue,
+    activeTab, handleTabChange,
+    activeMeal, setActiveMeal,
+    currentPlan, setCurrentPlan,
+    billingCycle, setBillingCycle,
+    chatMessages, chatInput, setChatInput, handleSendChat, chatLoading, isOpenAIConnected,
+    selectedDate, setSelectedDate,
+    todayFeeling, setTodayFeeling,
+    todayMemo, setTodayMemo,
+    todayStoolCount, setTodayStoolCount,
+    showSaved, saveTodayRecord,
+    showAnalyticsPanel, setShowAnalyticsPanel,
+    photos, addPhoto, removePhoto,
+    userLevel, userExp, streak, totalDays,
+    currentLevelInfo, nextLevelInfo, getExpProgress,
+    stravaConnected, setStravaConnected, showStravaModal, handleStravaConnect,
+    selectedExercises, toggleExerciseType, updateExerciseDuration, updateExerciseIntensity,
+    showExerciseSaved, saveExercise,
+    exerciseRecords, dailyRecords,
+    gutHealth, totalRecords, monthlyAvg,
+    goodDays, okayDays, badDays, goodPct, okayPct, badPct,
+    totalBowel, totalExerciseDays, totalCalories, avgDuration,
+    avgExerciseGut, avgNoExerciseGut, correlationScore, todayExercise,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

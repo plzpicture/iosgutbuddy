@@ -6,23 +6,26 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  Alert,
+  Platform,
+  ActionSheetIOS,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import { useApp } from '../context/AppContext';
 import { exerciseTypes, intensityLevels, feelings } from '../constants/data';
-import { Colors, Shadows } from '../constants/theme';
+import { Colors } from '../constants/theme';
 import Card from '../components/Card';
 import GradientButton from '../components/GradientButton';
 
 export default function LogScreen() {
   const {
     stravaConnected,
-    exerciseType,
-    setExerciseType,
-    exerciseDuration,
-    setExerciseDuration,
-    exerciseIntensity,
-    setExerciseIntensity,
+    selectedExercises,
+    toggleExerciseType,
+    updateExerciseDuration,
+    updateExerciseIntensity,
     showExerciseSaved,
     saveExercise,
     activeMeal,
@@ -35,9 +38,64 @@ export default function LogScreen() {
     setTodayStoolCount,
     showSaved,
     saveTodayRecord,
+    photos,
+    addPhoto,
+    removePhoto,
   } = useApp();
 
-  const canSaveExercise = exerciseType && exerciseIntensity;
+  const pickImage = async (source) => {
+    let result;
+    if (source === 'camera') {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera permission is required to take photos.');
+        return;
+      }
+      result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Photo library permission is required.');
+        return;
+      }
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+    }
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      addPhoto(result.assets[0].uri);
+    }
+  };
+
+  const showPhotoOptions = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take Photo', 'Choose from Library'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) pickImage('camera');
+          else if (buttonIndex === 2) pickImage('library');
+        }
+      );
+    } else {
+      Alert.alert('Add Photo', 'Choose an option', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Take Photo', onPress: () => pickImage('camera') },
+        { text: 'Choose from Library', onPress: () => pickImage('library') },
+      ]);
+    }
+  };
+
+  const canSaveExercise = selectedExercises.length > 0;
+  const totalDuration = selectedExercises.reduce((a, e) => a + e.duration, 0);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -52,77 +110,107 @@ export default function LogScreen() {
           </View>
         )}
 
-        {/* Activity Type */}
-        <Text style={styles.fieldLabel}>Activity type</Text>
+        {/* Activity Type - Multi-select */}
+        <Text style={styles.fieldLabel}>Activity type (select multiple)</Text>
         <View style={styles.exerciseTypeGrid}>
-          {exerciseTypes.map((e) => (
-            <TouchableOpacity
-              key={e.value}
-              onPress={() => setExerciseType(e.value)}
-              style={[
-                styles.exerciseTypeButton,
-                exerciseType === e.value && styles.exerciseTypeButtonSelected,
-              ]}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.exerciseTypeIcon}>{e.icon}</Text>
-              <Text style={styles.exerciseTypeLabel}>{e.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Duration */}
-        <Text style={styles.fieldLabel}>Duration</Text>
-        <View style={styles.durationRow}>
-          <TouchableOpacity
-            onPress={() => setExerciseDuration(Math.max(5, exerciseDuration - 5))}
-            style={styles.roundButton}
-          >
-            <Text style={styles.roundButtonText}>-</Text>
-          </TouchableOpacity>
-          <View style={styles.durationDisplay}>
-            <Text style={styles.durationValue}>{exerciseDuration}</Text>
-            <Text style={styles.durationUnit}>min</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setExerciseDuration(exerciseDuration + 5)}
-            style={styles.roundButton}
-          >
-            <Text style={styles.roundButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Intensity */}
-        <Text style={styles.fieldLabel}>Intensity</Text>
-        <View style={styles.intensityRow}>
-          {intensityLevels.map((lv) => {
-            const selected = exerciseIntensity === lv.value;
+          {exerciseTypes.map((e) => {
+            const isSelected = selectedExercises.some((se) => se.type === e.value);
             return (
               <TouchableOpacity
-                key={lv.value}
-                onPress={() => setExerciseIntensity(lv.value)}
+                key={e.value}
+                onPress={() => toggleExerciseType(e.value)}
                 style={[
-                  styles.intensityButton,
-                  selected && { borderColor: lv.color, borderWidth: 2, backgroundColor: `${lv.color}15` },
+                  styles.exerciseTypeButton,
+                  isSelected && styles.exerciseTypeButtonSelected,
                 ]}
                 activeOpacity={0.7}
               >
-                <Text style={styles.intensityEmoji}>{lv.emoji}</Text>
-                <Text
-                  style={[
-                    styles.intensityLabel,
-                    selected && { fontWeight: '600' },
-                  ]}
-                >
-                  {lv.label}
-                </Text>
+                <Text style={styles.exerciseTypeIcon}>{e.icon}</Text>
+                <Text style={styles.exerciseTypeLabel}>{e.label}</Text>
+                {isSelected && <Text style={styles.checkMark}>{'\u2713'}</Text>}
               </TouchableOpacity>
             );
           })}
         </View>
 
+        {/* Per-exercise settings */}
+        {selectedExercises.map((ex) => {
+          const info = exerciseTypes.find((e) => e.value === ex.type);
+          return (
+            <View key={ex.type} style={styles.exerciseCard}>
+              <View style={styles.exerciseCardHeader}>
+                <Text style={styles.exerciseCardTitle}>
+                  {info?.icon} {info?.label}
+                </Text>
+                <TouchableOpacity onPress={() => toggleExerciseType(ex.type)}>
+                  <Text style={styles.exerciseCardRemove}>{'\u2715'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Duration */}
+              <Text style={styles.subLabel}>Duration</Text>
+              <View style={styles.durationRow}>
+                <TouchableOpacity
+                  onPress={() => updateExerciseDuration(ex.type, Math.max(5, ex.duration - 5))}
+                  style={styles.roundButton}
+                >
+                  <Text style={styles.roundButtonText}>-</Text>
+                </TouchableOpacity>
+                <View style={styles.durationDisplay}>
+                  <Text style={styles.durationValue}>{ex.duration}</Text>
+                  <Text style={styles.durationUnit}>min</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => updateExerciseDuration(ex.type, ex.duration + 5)}
+                  style={styles.roundButton}
+                >
+                  <Text style={styles.roundButtonText}>+</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Intensity */}
+              <Text style={styles.subLabel}>Intensity</Text>
+              <View style={styles.intensityRow}>
+                {intensityLevels.map((lv) => {
+                  const selected = ex.intensity === lv.value;
+                  return (
+                    <TouchableOpacity
+                      key={lv.value}
+                      onPress={() => updateExerciseIntensity(ex.type, lv.value)}
+                      style={[
+                        styles.intensityButton,
+                        selected && { borderColor: lv.color, borderWidth: 2, backgroundColor: `${lv.color}15` },
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.intensityEmoji}>{lv.emoji}</Text>
+                      <Text
+                        style={[
+                          styles.intensityLabel,
+                          selected && { fontWeight: '600' },
+                        ]}
+                      >
+                        {lv.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })}
+
+        {/* Total summary */}
+        {selectedExercises.length > 1 && (
+          <View style={styles.totalSummary}>
+            <Text style={styles.totalSummaryText}>
+              {'\u{1F4CA}'} {selectedExercises.length} exercises selected {'\u2022'} Total: {totalDuration} min
+            </Text>
+          </View>
+        )}
+
         <GradientButton
-          title={'\u{1F3C3} Save Exercise'}
+          title={`\u{1F3C3} Save Exercise${selectedExercises.length > 1 ? `s (${selectedExercises.length})` : ''}`}
           colors={canSaveExercise ? [Colors.orange, Colors.orangeDark] : ['#E8E0D5', '#E8E0D5']}
           disabled={!canSaveExercise}
           onPress={saveExercise}
@@ -171,13 +259,28 @@ export default function LogScreen() {
       <Card>
         <Text style={styles.fieldLabel}>{'\u{1F4F8}'} Stool / Meal Photos</Text>
         <View style={styles.photoRow}>
-          {[0, 1, 2, 3].map((i) => (
-            <TouchableOpacity key={i} style={[styles.photoPlaceholder, i < 2 && styles.photoCircle]}>
-              <Text style={styles.photoPlus}>+</Text>
-            </TouchableOpacity>
+          {photos.map((uri, i) => (
+            <View key={i} style={styles.photoContainer}>
+              <Image source={{ uri }} style={styles.photoImage} />
+              <TouchableOpacity
+                style={styles.photoRemoveButton}
+                onPress={() => removePhoto(i)}
+              >
+                <Text style={styles.photoRemoveText}>{'\u2715'}</Text>
+              </TouchableOpacity>
+            </View>
           ))}
+          {photos.length < 4 && (
+            <TouchableOpacity style={styles.photoPlaceholder} onPress={showPhotoOptions}>
+              <Text style={styles.photoPlus}>+</Text>
+              <Text style={styles.photoAddLabel}>Add</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        <GradientButton title={'\u{1F50D} Analyze with AI'} onPress={() => {}} />
+        <GradientButton
+          title={'\u{1F50D} Analyze with AI'}
+          onPress={showPhotoOptions}
+        />
       </Card>
 
       {/* Gut Feeling */}
@@ -270,6 +373,12 @@ const styles = StyleSheet.create({
     color: '#8B7355',
     marginBottom: 10,
   },
+  subLabel: {
+    fontSize: 12,
+    color: '#8B7355',
+    marginBottom: 6,
+    marginTop: 8,
+  },
   stravaNote: {
     backgroundColor: '#FFF3EC',
     padding: 8,
@@ -309,11 +418,42 @@ const styles = StyleSheet.create({
   exerciseTypeLabel: {
     fontSize: 13,
   },
+  checkMark: {
+    fontSize: 14,
+    color: Colors.orange,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  // Per-exercise card
+  exerciseCard: {
+    backgroundColor: Colors.orangeBg,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.orange + '40',
+  },
+  exerciseCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  exerciseCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.orange,
+  },
+  exerciseCardRemove: {
+    fontSize: 16,
+    color: '#999',
+    padding: 4,
+  },
+  // Duration
   durationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 4,
   },
   roundButton: {
     width: 36,
@@ -346,7 +486,7 @@ const styles = StyleSheet.create({
   intensityRow: {
     flexDirection: 'row',
     gap: 6,
-    marginBottom: 16,
+    marginBottom: 4,
   },
   intensityButton: {
     flex: 1,
@@ -364,6 +504,19 @@ const styles = StyleSheet.create({
   intensityLabel: {
     fontSize: 11,
     marginTop: 2,
+  },
+  // Total summary
+  totalSummary: {
+    backgroundColor: '#FFF3EC',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  totalSummaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.orange,
   },
   savedText: {
     textAlign: 'center',
@@ -398,15 +551,45 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
   },
+  // Photos
   photoRow: {
     flexDirection: 'row',
     gap: 10,
     marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  photoContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  photoRemoveButton: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoRemoveText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   photoPlaceholder: {
-    width: 52,
-    height: 52,
-    borderRadius: 10,
+    width: 72,
+    height: 72,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: Colors.primary,
     borderStyle: 'dashed',
@@ -414,13 +597,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  photoCircle: {
-    borderRadius: 26,
-  },
   photoPlus: {
-    fontSize: 16,
+    fontSize: 20,
     color: Colors.primary,
   },
+  photoAddLabel: {
+    fontSize: 9,
+    color: Colors.primary,
+    marginTop: 2,
+  },
+  // Feelings
   feelingsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
