@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { useApp } from '../context/AppContext';
 import { getExerciseIcon, getExerciseLabel } from '../constants/data';
 import { Colors, Shadows } from '../constants/theme';
@@ -9,7 +10,8 @@ import CircularProgress from '../components/CircularProgress';
 import GradientButton from '../components/GradientButton';
 import analytics from '../utils/analytics';
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen() {
+  const router = useRouter();
   const {
     userProfile,
     gutHealth,
@@ -98,7 +100,7 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.noExerciseText}>
               No exercise logged.{' '}
             </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Log')}>
+            <TouchableOpacity onPress={() => router.push('/log')}>
               <Text style={styles.logNowLink}>Log now {'\u2192'}</Text>
             </TouchableOpacity>
           </View>

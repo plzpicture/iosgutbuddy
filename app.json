@@ -3,6 +3,7 @@
     "name": "GutBuddy",
     "slug": "gutbuddy",
     "version": "1.0.0",
+    "scheme": "gutbuddy",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,6 +21,9 @@
         "backgroundColor": "#FFF9F0"
       },
       "package": "com.gutbuddy.app"
-    }
+    },
+    "plugins": [
+      "expo-router"
+    ]
   }
 }
