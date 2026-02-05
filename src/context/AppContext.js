@@ -8,7 +8,7 @@ import {
   initialDailyRecords,
 } from '../constants/data';
 
-const CLAUDE_API_KEY = ''; // Set your Anthropic Claude API key here
+const CLAUDE_API_KEY = process.env.EXPO_PUBLIC_CLAUDE_API_KEY || '';
 
 const AppContext = createContext();
 
