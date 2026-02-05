@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "GutBuddy",
+    "slug": "gutbuddy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#FFF9F0",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.gutbuddy.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF9F0"
+      },
+      "package": "com.gutbuddy.app"
+    }
+  }
+}
